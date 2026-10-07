@@ -100,10 +100,9 @@ details.card[open] summary::after { content: " ▾"; }
 <script>
 'use strict'
 const TZ = 'Australia/Brisbane', BNE = 10 * 3600e3 // Brisbane is UTC+10, no daylight saving
-const ORDER = ['max', 'lambert', 'quinn']
 const LS = { get: k => { try { return localStorage.getItem(k) } catch { return null } }, set: (k, v) => { try { localStorage.setItem(k, v) } catch {} } }
 const $ = s => document.querySelector(s)
-let key = null, data = null, checked = 0, offline = false, sel = LS.get('plans-sel') || 'max'
+let key = null, data = null, docs = new Map(), checked = 0, offline = false, sel = LS.get('plans-sel') || 'max'
 
 // ---- parsing: same rules as the desktop Plan pane (plan/hooks/parse.ts) ----
 function parsePlan(name, text, updatedMs) {
@@ -160,10 +159,29 @@ async function decrypt(buf, k) {
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf.slice(0, 12) }, ck, buf.slice(12))
   return JSON.parse(new TextDecoder().decode(plain))
 }
-async function fetchBlob() {
-  const r = await fetch(`plans.enc?t=${Date.now()}`, { cache: 'no-store' })
+async function fetchBlob(path) {
+  const r = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-store' })
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return { buf: new Uint8Array(await r.arrayBuffer()), cached: r.headers.get('x-plans-cache') === '1' }
+}
+// plans/index.enc lists every agent (from any machine); each plan is its own plans/<id>.enc, fetched
+// only when its content mark (h) changed. A new agent appears as soon as its file is in the index.
+async function load() {
+  const idx = await fetchBlob('plans/index.enc')
+  const index = await decrypt(idx.buf, key)
+  let cached = idx.cached
+  const next = new Map()
+  await Promise.all(index.agents.map(async e => {
+    const have = docs.get(e.id)
+    if (have && have.h === e.h) { next.set(e.id, have); return }
+    try {
+      const r = await fetchBlob(`plans/${e.id}.enc`)
+      cached = cached || r.cached
+      next.set(e.id, { ...(await decrypt(r.buf, key)), h: e.h })
+    } catch (err) { if (have) next.set(e.id, have); else throw err }
+  }))
+  docs = next
+  return { synced: index.synced, agents: [...docs.values()].map(d => ({ name: d.name, mtimeMs: d.updatedMs, text: d.text })), cached }
 }
 
 let busy = false
@@ -171,8 +189,8 @@ async function refresh() {
   if (!key || busy) return
   busy = true
   try {
-    const { buf, cached } = await fetchBlob()
-    data = await decrypt(buf, key)
+    const got = await load()
+    data = got; const cached = got.cached
     offline = cached; if (!cached) checked = Date.now()
     render()
   } catch (e) {
@@ -195,9 +213,10 @@ $('#keybtn').onclick = async () => {
 // ---- render ----
 function agentsSorted() {
   if (!data) return []
-  const rank = n => { const i = ORDER.indexOf(n.toLowerCase()); return i < 0 ? ORDER.length : i }
+  // Max first, then everyone else alphabetically.
+  const rank = n => n.toLowerCase() === 'max' ? 0 : 1
   return data.agents.map(a => parsePlan(a.name, a.text, a.mtimeMs))
-    .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
+    .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
 }
 const wide = () => matchMedia('(min-width: 760px)').matches
 

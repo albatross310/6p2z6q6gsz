@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Plans">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f4f4f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151617" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>Plans</title>
+<style>
+:root {
+  --bg: #f4f4f1; --card: #ffffff; --text: #1b1c1d; --dim: #63666b; --line: #e1e1dc;
+  --now: #1f8f43; --wait: #d93a3f; --live: #2f6fdc; --neutral: #6b7280; --tab: #e7e7e2;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151617; --card: #212325; --text: #ececea; --dim: #a1a4a8; --line: #313437;
+    --now: #3fbf68; --wait: #f0656a; --live: #6aa1ff; --neutral: #8b919a; --tab: #2b2e31;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 17.5px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  overflow-x: hidden; overflow-wrap: anywhere;
+}
+header {
+  position: sticky; top: 0; z-index: 2; background: var(--bg);
+  padding: calc(env(safe-area-inset-top) + 10px) max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--line);
+}
+.tabs { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: 0 0 auto; border: 0; border-radius: 999px; padding: 7px 15px; font: inherit; font-weight: 600;
+  background: var(--tab); color: var(--text); cursor: pointer; display: flex; align-items: center; gap: 7px;
+}
+.tab[aria-selected="true"] { background: var(--text); color: var(--bg); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--neutral); opacity: .5; }
+.dot.fresh { background: var(--now); opacity: 1; }
+.status { margin-top: 6px; font-size: 14.5px; color: var(--dim); }
+.status.warn { color: var(--wait); }
+main {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px;
+  padding: 12px max(16px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 28px) max(16px, env(safe-area-inset-left));
+}
+@media (min-width: 760px) { main.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.agent-head { display: flex; align-items: baseline; gap: 8px; margin: 2px 2px 10px; }
+.agent-head h1 { font-size: 21px; margin: 0; text-transform: capitalize; }
+.agent-head span { color: var(--dim); font-size: 15px; }
+.card {
+  background: var(--card); border-radius: 14px; padding: 12px 14px 14px; margin-bottom: 12px;
+  border-top: 4px solid var(--c, var(--line));
+}
+.card h2 { margin: 0 0 4px; font-size: 14.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--c, var(--dim)); }
+.item { margin-top: 12px; }
+.item:first-of-type { margin-top: 6px; }
+.title { font-weight: 650; }
+.badge {
+  display: inline-block; min-width: 1.6em; padding: 0 .4em; margin-right: 6px; border-radius: 7px; text-align: center;
+  background: var(--c, var(--neutral)); color: #fff; font-weight: 700; font-size: 16px; line-height: 1.5;
+}
+.bullet { color: var(--c, var(--dim)); font-weight: 700; margin-right: 6px; }
+.eta { font-weight: 600; white-space: nowrap; color: var(--now); }
+.eta.over { color: var(--wait); }
+.detail { color: var(--dim); font-size: 17px; margin-top: 3px; padding-left: 18px; }
+.detail b { color: var(--text); font-weight: 600; }
+details.card summary { cursor: pointer; list-style: none; }
+details.card summary::-webkit-details-marker { display: none; }
+details.card summary h2 { display: inline; }
+details.card summary::after { content: " ▸"; color: var(--dim); }
+details.card[open] summary::after { content: " ▾"; }
+.done { color: var(--dim); margin-top: 6px; }
+.empty { color: var(--dim); padding: 24px 2px; }
+#unlock { padding: 24px 16px; max-width: 520px; }
+#unlock input { width: 100%; font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+#unlock button { margin-top: 10px; font: inherit; font-weight: 600; padding: 9px 18px; border-radius: 10px; border: 0; background: var(--text); color: var(--bg); }
+</style>
+</head>
+<body>
+<header hidden><nav class="tabs" role="tablist"></nav><div class="status"></div></header>
+<main></main>
+<section id="unlock" hidden>
+  <p>Paste your Plans link (or its key) once.</p>
+  <input id="keyin" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://…#k=…">
+  <button id="keybtn">Open</button>
+  <p id="keymsg" class="status"></p>
+</section>
+<script>
+'use strict'
+const TZ = 'Australia/Brisbane', BNE = 10 * 3600e3 // Brisbane is UTC+10, no daylight saving
+const ORDER = ['max', 'lambert', 'quinn']
+const LS = { get: k => { try { return localStorage.getItem(k) } catch { return null } }, set: (k, v) => { try { localStorage.setItem(k, v) } catch {} } }
+const $ = s => document.querySelector(s)
+let key = null, data = null, checked = 0, offline = false, sel = LS.get('plans-sel') || 'max'
+
+// ---- parsing: same rules as the desktop Plan pane (plan/hooks/parse.ts) ----
+function parsePlan(name, text, updatedMs) {
+  const sections = []; let cur = null
+  for (const raw of text.split('\n')) {
+    const line = raw.trimEnd()
+    const h = /^##\s+(.*)$/.exec(line)
+    if (h) { cur = { title: h[1].trim(), items: [] }; sections.push(cur); continue }
+    const last = cur && cur.items[cur.items.length - 1]
+    if (last && /^\s{2,}\S/.test(line) && !/^\s*[-*]\s+\[[ xX]\]/.test(line)) {
+      const eta = /^\s*ETA:\s*(\d{1,2}:\d{2})\b/i.exec(line)
+      if (eta) { last.eta = eta[1]; continue }
+      last.detail.push(line.trim().replace(/^[-*]\s+/, ''))
+      continue
+    }
+    const it = /^(?:[-*]|(\d+|[a-z])\.)\s+(.*)$/.exec(line)
+    const body = it ? it[2].replace(/^\[[ xX]\]\s*/, '').trim() : undefined
+    const n = (it && it[1]) || (/^(\d+|[a-z])\.\s+/.exec(body || '') || [])[1]
+    const t = n && !(it && it[1]) ? body.replace(/^(?:\d+|[a-z])\.\s+/, '') : body
+    if (t && cur && !/^\(nothing/i.test(t)) cur.items.push({ text: t, detail: [], ...(n ? { num: n } : {}) })
+  }
+  return { name, updatedMs, sections: sections.filter(s => s.items.length) }
+}
+const isDone = t => /^(done|ticked)/i.test(t)
+const secColor = t => /^now/i.test(t) ? 'var(--now)' : /^waiting/i.test(t) ? 'var(--wait)' : /^live/i.test(t) ? 'var(--live)' : ''
+// Minutes until today's "HH:MM" in Brisbane, whatever zone the phone is in.
+function etaLeft(hhmm, now) {
+  const [h, m] = hhmm.split(':').map(Number)
+  const b = new Date(now + BNE)
+  const at = Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate(), h, m) - BNE
+  const min = Math.round((at - now) / 60000)
+  if (min < -720) return ''
+  if (min <= 0) return 'overdue'
+  return min < 60 ? `~${min}m left` : `~${Math.floor(min / 60)}h ${min % 60}m left`
+}
+function ago(ms, now) {
+  const sec = Math.max(0, Math.round((now - ms) / 1000))
+  if (sec < 60) return `${sec}s`
+  const m = Math.round(sec / 60)
+  return m < 60 ? `${m} min` : `${Math.round(m / 60)} h`
+}
+const hm = ms => new Intl.DateTimeFormat('en-AU', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(ms)
+const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+const fmt = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>')
+
+// ---- key + decryption ----
+function keyFrom(s) {
+  const m = /(?:^|[#&?])k=([A-Za-z0-9_-]{43})/.exec(s) || /^\s*([A-Za-z0-9_-]{43})\s*$/.exec(s)
+  return m ? m[1] : null
+}
+const b64u = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='), c => c.charCodeAt(0))
+async function decrypt(buf, k) {
+  const ck = await crypto.subtle.importKey('raw', b64u(k), 'AES-GCM', false, ['decrypt'])
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf.slice(0, 12) }, ck, buf.slice(12))
+  return JSON.parse(new TextDecoder().decode(plain))
+}
+async function fetchBlob() {
+  const r = await fetch(`plans.enc?t=${Date.now()}`, { cache: 'no-store' })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return { buf: new Uint8Array(await r.arrayBuffer()), cached: r.headers.get('x-plans-cache') === '1' }
+}
+
+let busy = false
+async function refresh() {
+  if (!key || busy) return
+  busy = true
+  try {
+    const { buf, cached } = await fetchBlob()
+    data = await decrypt(buf, key)
+    offline = cached; if (!cached) checked = Date.now()
+    render()
+  } catch (e) {
+    if (e && e.name === 'OperationError') { showUnlock('That key does not open these plans.'); return }
+    offline = true; render()
+  } finally { busy = false }
+}
+
+function showUnlock(msg) {
+  $('header').hidden = true; $('main').hidden = true; $('#unlock').hidden = false
+  $('#keymsg').textContent = msg || ''
+}
+$('#keybtn').onclick = async () => {
+  const k = keyFrom($('#keyin').value)
+  if (!k) { $('#keymsg').textContent = 'No key found in that.'; return }
+  key = k; LS.set('plans-key', k); history.replaceState(null, '', `#k=${k}`)
+  $('#unlock').hidden = true; $('main').hidden = false; refresh()
+}
+
+// ---- render ----
+function agentsSorted() {
+  if (!data) return []
+  const rank = n => { const i = ORDER.indexOf(n.toLowerCase()); return i < 0 ? ORDER.length : i }
+  return data.agents.map(a => parsePlan(a.name, a.text, a.mtimeMs))
+    .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
+}
+const wide = () => matchMedia('(min-width: 760px)').matches
+
+function itemHtml(t, title, now) {
+  const c = secColor(title)
+  const mark = t.num ? `<span class="badge">${esc(t.num)}</span>` : `<span class="bullet">•</span>`
+  const left = t.eta ? etaLeft(t.eta, now) : ''
+  const eta = left ? ` <span class="eta${left === 'overdue' ? ' over' : ''}">· ETA ${esc(t.eta)} (${left})</span>` : ''
+  const det = t.detail.map(d => `<div class="detail">${fmt(d).replace(/^([A-Z][A-Za-z ]{0,18}:)/, '<b>$1</b>')}</div>`).join('')
+  return `<div class="item"><div class="title">${mark}${fmt(t.text)}${eta}</div>${det}</div>`
+}
+function planHtml(a, now) {
+  const open = a.sections.filter(s => !isDone(s.title)), done = a.sections.filter(s => isDone(s.title))
+  let h = `<div class="agent-head"><h1>${esc(a.name)}</h1><span>updated ${ago(a.updatedMs, now)} ago</span></div>`
+  for (const s of open) {
+    const c = secColor(s.title)
+    h += `<section class="card" style="${c ? `--c:${c}` : ''}"><h2>${esc(s.title)}</h2>${s.items.map(t => itemHtml(t, s.title, now)).join('')}</section>`
+  }
+  for (const s of done) {
+    h += `<details class="card"><summary><h2>${esc(s.title)} · ${s.items.length}</h2></summary>${s.items.map(t => `<div class="done">✓ ${fmt(t.text)}</div>`).join('')}</details>`
+  }
+  if (!a.sections.length) h += `<div class="empty">Nothing on this list.</div>`
+  return `<article>${h}</article>`
+}
+
+function render() {
+  if (!data) return
+  const now = Date.now(), list = agentsSorted()
+  if (!list.length) { $('main').innerHTML = '<div class="empty">No plans yet.</div>'; return }
+  let i = list.findIndex(a => a.name.toLowerCase() === sel.toLowerCase()); if (i < 0) i = 0
+  const shown = wide() && list.length > 1 ? [list[i], list[(i + 1) % list.length]] : [list[i]]
+  // Keep <details> open/closed across re-renders.
+  const openDone = new Set([...document.querySelectorAll('details.card[open]')].map(d => d.closest('article')?.querySelector('h1')?.textContent))
+  $('header').hidden = false
+  $('.tabs').innerHTML = list.map(a => `<button class="tab" role="tab" data-n="${esc(a.name)}" aria-selected="${shown.includes(a)}"><span class="dot${now - a.updatedMs < 5 * 60e3 ? ' fresh' : ''}"></span>${esc(a.name[0].toUpperCase() + a.name.slice(1))}</button>`).join('')
+  const st = $('.status')
+  st.textContent = `last synced ${hm(data.synced)}` + (offline ? ' · offline, showing the last copy' : checked ? ` · checked ${hm(checked)}` : '')
+  st.classList.toggle('warn', offline)
+  const m = $('main'); m.className = shown.length > 1 ? 'two' : ''
+  m.innerHTML = shown.map(a => planHtml(a, now)).join('')
+  m.querySelectorAll('article').forEach(art => { if (openDone.has(art.querySelector('h1').textContent)) art.querySelector('details')?.setAttribute('open', '') })
+}
+$('.tabs').addEventListener('click', e => {
+  const b = e.target.closest('.tab'); if (!b) return
+  sel = b.dataset.n; LS.set('plans-sel', sel); render(); scrollTo(0, 0)
+})
+function step(d) {
+  const list = agentsSorted(); if (list.length < 2) return
+  let i = list.findIndex(a => a.name.toLowerCase() === sel.toLowerCase()); if (i < 0) i = 0
+  sel = list[(i + d + list.length) % list.length].name; LS.set('plans-sel', sel); render(); scrollTo(0, 0)
+}
+let tx = 0, ty = 0
+document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; ty = e.touches[0].clientY }, { passive: true })
+document.addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty
+  if (Math.abs(dx) > 70 && Math.abs(dx) > 1.6 * Math.abs(dy) && !e.target.closest('.tabs')) step(dx < 0 ? 1 : -1)
+}, { passive: true })
+matchMedia('(min-width: 760px)').addEventListener('change', render)
+
+// ---- start ----
+key = keyFrom(location.hash) || LS.get('plans-key')
+if (key) {
+  LS.set('plans-key', key)
+  // Keep the key in the address so Safari's "Add to Home Screen" carries it into the installed app.
+  if (keyFrom(location.hash) !== key) history.replaceState(null, '', `#k=${key}`)
+  refresh()
+} else showUnlock()
+setInterval(() => { if (document.visibilityState === 'visible') refresh() }, 30e3)
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh() })
+addEventListener('focus', refresh)
+addEventListener('pageshow', refresh)
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {})
+</script>
+</body>
+</html>

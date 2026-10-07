@@ -55,7 +55,27 @@ main {
   display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px;
   padding: 12px max(16px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 28px) max(16px, env(safe-area-inset-left));
 }
-main > article { width: 100%; max-width: 760px; justify-self: center; }
+#chat, #plan { width: 100%; max-width: 760px; justify-self: center; }
+.send { display: flex; gap: 8px; align-items: flex-end; }
+.send textarea {
+  flex: 1; min-width: 0; font: inherit; padding: 7px 11px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); resize: none; max-height: 40vh; display: block;
+}
+.btn { font: inherit; font-weight: 600; padding: 7px 15px; border-radius: 10px; border: 0; background: var(--text); color: var(--bg); cursor: pointer; }
+.btn:disabled { opacity: .5; }
+.btn.ghost { background: var(--tab); color: var(--text); }
+.chatnote { display: flex; justify-content: space-between; gap: 10px; margin: 4px 2px 0; font-size: 12.5px; color: var(--dim); }
+.chatnote.warn #chatmsg { color: var(--wait); }
+.link { background: none; border: 0; padding: 0; font: inherit; color: var(--dim); text-decoration: underline; cursor: pointer; }
+#settings { margin-top: 6px; padding: 10px 12px; background: var(--card); border-radius: 10px; font-size: 13.5px; color: var(--dim); }
+#settings input { width: 100%; margin: 8px 0; font: inherit; padding: 7px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+#thread { list-style: none; margin: 6px 2px 0; padding: 0; font-size: 13.5px; }
+#thread:empty { display: none; }
+#thread li { margin-top: 4px; white-space: pre-wrap; }
+.t { color: var(--dim); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.st { color: var(--dim); font-size: 12px; }
+.st.replied { color: var(--now); }
+.rep { margin: 2px 0 0 14px; }
 .agent-head { display: flex; align-items: baseline; gap: 8px; margin: 2px 2px 10px; }
 .agent-head h1 { font-size: 18px; margin: 0; text-transform: capitalize; }
 .agent-head span { color: var(--dim); font-size: 13px; }
@@ -90,7 +110,23 @@ details.card[open] summary::after { content: " ▾"; }
 </head>
 <body>
 <header hidden><nav class="tabs" role="tablist"></nav><div class="status"></div></header>
-<main></main>
+<main>
+  <section id="chat" hidden>
+    <form class="send" id="sendform" autocomplete="off">
+      <textarea id="msg" rows="1" maxlength="4000" placeholder="Message"></textarea>
+      <button class="btn" id="sendbtn">Send</button>
+    </form>
+    <div class="chatnote"><span id="chatmsg"></span><button type="button" class="link" id="setbtn">settings</button></div>
+    <div id="settings" hidden>
+      Send key: a GitHub fine-grained token for this one repo (Contents: read and write). It stays in this browser only.
+      <input id="tokin" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…">
+      <button type="button" class="btn" id="toksave">Save</button> <button type="button" class="btn ghost" id="tokdel">Remove</button>
+      <div id="tokmsg" class="status"></div>
+    </div>
+    <ol id="thread"></ol>
+  </section>
+  <div id="plan"></div>
+</main>
 <section id="unlock" hidden>
   <p>Paste your Plans link (or its key) once.</p>
   <input id="keyin" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://…#k=…">
@@ -100,7 +136,7 @@ details.card[open] summary::after { content: " ▾"; }
 <script>
 'use strict'
 const TZ = 'Australia/Brisbane', BNE = 10 * 3600e3 // Brisbane is UTC+10, no daylight saving
-const LS = { get: k => { try { return localStorage.getItem(k) } catch { return null } }, set: (k, v) => { try { localStorage.setItem(k, v) } catch {} } }
+const LS = { get: k => { try { return localStorage.getItem(k) } catch { return null } }, set: (k, v) => { try { localStorage.setItem(k, v) } catch {} }, del: k => { try { localStorage.removeItem(k) } catch {} } }
 const $ = s => document.querySelector(s)
 let key = null, data = null, docs = new Map(), checked = 0, offline = false, sel = LS.get('plans-sel') || 'max'
 
@@ -144,6 +180,8 @@ function ago(ms, now) {
   const m = Math.round(sec / 60)
   return m < 60 ? `${m} min` : `${Math.round(m / 60)} h`
 }
+const day = ms => new Intl.DateTimeFormat('en-AU', { timeZone: TZ, day: 'numeric', month: 'short' }).format(ms)
+const when = ms => day(ms) === day(Date.now()) ? hm(ms) : `${day(ms)} ${hm(ms)}`
 const hm = ms => new Intl.DateTimeFormat('en-AU', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(ms)
 const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const fmt = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -158,6 +196,13 @@ async function decrypt(buf, k) {
   const ck = await crypto.subtle.importKey('raw', b64u(k), 'AES-GCM', false, ['decrypt'])
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf.slice(0, 12) }, ck, buf.slice(12))
   return JSON.parse(new TextDecoder().decode(plain))
+}
+async function encrypt(obj, k) {
+  const ck = await crypto.subtle.importKey('raw', b64u(k), 'AES-GCM', false, ['encrypt'])
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, ck, new TextEncoder().encode(JSON.stringify(obj))))
+  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12)
+  return out
 }
 async function fetchBlob(path) {
   const r = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-store' })
@@ -181,7 +226,7 @@ async function load() {
     } catch (err) { if (have) next.set(e.id, have); else throw err }
   }))
   docs = next
-  return { synced: index.synced, agents: [...docs.values()].map(d => ({ name: d.name, mtimeMs: d.updatedMs, text: d.text })), cached }
+  return { synced: index.synced, agents: [...docs].map(([id, d]) => ({ id, name: d.name, mtimeMs: d.updatedMs, text: d.text })), cached }
 }
 
 let busy = false
@@ -193,6 +238,7 @@ async function refresh() {
     data = got; const cached = got.cached
     offline = cached; if (!cached) checked = Date.now()
     render()
+    pullThread()
   } catch (e) {
     if (e && e.name === 'OperationError') { showUnlock('That key does not open these plans.'); return }
     offline = true; render()
@@ -215,7 +261,7 @@ function agentsSorted() {
   if (!data) return []
   // Max first, then everyone else alphabetically.
   const rank = n => n.toLowerCase() === 'max' ? 0 : 1
-  return data.agents.map(a => parsePlan(a.name, a.text, a.mtimeMs))
+  return data.agents.map(a => ({ ...parsePlan(a.name, a.text, a.mtimeMs), id: a.id }))
     .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
 }
 
@@ -244,7 +290,7 @@ function planHtml(a, now) {
 function render() {
   if (!data) return
   const now = Date.now(), list = agentsSorted()
-  if (!list.length) { $('main').innerHTML = '<div class="empty">No plans yet.</div>'; return }
+  if (!list.length) { $('#chat').hidden = true; $('#plan').innerHTML = '<div class="empty">No plans yet.</div>'; return }
   let i = list.findIndex(a => a.name.toLowerCase() === sel.toLowerCase()); if (i < 0) i = 0
   const shown = [list[i]] // only the selected agent, at every width (Peter, 7 Oct)
   // Keep <details> open/closed across re-renders.
@@ -254,25 +300,138 @@ function render() {
   const st = $('.status')
   st.textContent = `last synced ${hm(data.synced)}` + (offline ? ' · offline, showing the last copy' : checked ? ` · checked ${hm(checked)}` : '')
   st.classList.toggle('warn', offline)
-  const m = $('main')
+  const m = $('#plan')
   m.innerHTML = shown.map(a => planHtml(a, now)).join('')
+  renderChat()
   m.querySelectorAll('article').forEach(art => { if (openDone.has(art.querySelector('h1').textContent)) art.querySelector('details')?.setAttribute('open', '') })
 }
 $('.tabs').addEventListener('click', e => {
   const b = e.target.closest('.tab'); if (!b) return
-  sel = b.dataset.n; LS.set('plans-sel', sel); render(); scrollTo(0, 0)
+  sel = b.dataset.n; LS.set('plans-sel', sel); render(); scrollTo(0, 0); pullThread()
 })
 function step(d) {
   const list = agentsSorted(); if (list.length < 2) return
   let i = list.findIndex(a => a.name.toLowerCase() === sel.toLowerCase()); if (i < 0) i = 0
-  sel = list[(i + d + list.length) % list.length].name; LS.set('plans-sel', sel); render(); scrollTo(0, 0)
+  sel = list[(i + d + list.length) % list.length].name; LS.set('plans-sel', sel); render(); scrollTo(0, 0); pullThread()
 }
 let tx = 0, ty = 0
 document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; ty = e.touches[0].clientY }, { passive: true })
 document.addEventListener('touchend', e => {
   const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty
+  if (e.target.closest && e.target.closest('#chat')) return // swiping inside the message box is not a tab change
   if (Math.abs(dx) > 70 && Math.abs(dx) > 1.6 * Math.abs(dy) && !(e.target.closest && e.target.closest('.tabs'))) step(dx < 0 ? 1 : -1)
 }, { passive: true })
+
+// ---- messages to the open agent ----
+// The phone writes inbox/<agent id>/<msg id>.enc (encrypted with the plans key) through the GitHub contents API,
+// using a send key (fine-grained token, this repo only) kept in this browser's localStorage. The Mac pulls it
+// into that agent's inbox log, deletes it, and records it in replies/<agent id>.enc, which also carries replies.
+const GH = 'albatross310/6p2z6q6gsz', API = `https://api.github.com/repos/${GH}/`
+const tok = () => LS.get('plans-gh-token')
+const cap = s => s[0].toUpperCase() + s.slice(1)
+const threads = new Map(), drafts = new Map()
+let chatFor = null, sending = false
+const sentList = () => { try { return JSON.parse(LS.get('plans-sent') || '[]') } catch { return [] } }
+const saveSent = a => LS.set('plans-sent', JSON.stringify(a.slice(-60)))
+const b64 = u8 => { let s = ''; for (const c of u8) s += String.fromCharCode(c); return btoa(s) }
+const gh = (path, opt = {}, t = tok()) => fetch(API + path, {
+  cache: 'no-store', ...opt,
+  headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(opt.headers || {}) },
+})
+function current() {
+  const list = agentsSorted()
+  return list.find(a => a.name.toLowerCase() === sel.toLowerCase()) || list[0]
+}
+function note(text, warn) { $('#chatmsg').textContent = text || ''; $('.chatnote').classList.toggle('warn', !!warn) }
+
+async function sendMessage(a, text) {
+  const sentMs = Date.now()
+  const id = `${sentMs}-${[...crypto.getRandomValues(new Uint8Array(3))].map(b => b.toString(16).padStart(2, '0')).join('')}`
+  const body = await encrypt({ v: 1, id, name: a.name, text, sentMs }, key)
+  let r
+  try { r = await gh(`contents/inbox/${a.id}/${id}.enc`, { method: 'PUT', body: JSON.stringify({ message: 'inbox', content: b64(body) }) }) }
+  catch { throw new Error('Not sent: no connection?') }
+  if (r.status === 401) throw new Error('Not sent: GitHub rejected the send key (settings).')
+  if (r.status === 403 || r.status === 404) throw new Error('Not sent: the send key cannot write to this repo (settings).')
+  if (!r.ok) throw new Error(`Not sent: GitHub said ${r.status}.`)
+  return { id, aid: a.id, text, sentMs }
+}
+// replies/<id>.enc: straight from the API when there is a send key (no Pages delay), else from the site.
+async function pullThread() {
+  const a = data && current(); if (!a || !key) return
+  try {
+    let buf = null, done = false
+    if (tok()) try {
+      const r = await gh(`contents/replies/${a.id}.enc?ref=main`, { headers: { Accept: 'application/vnd.github.raw' } })
+      if (r.ok) { buf = new Uint8Array(await r.arrayBuffer()); done = true } else if (r.status === 404) done = true
+    } catch {}
+    if (!done) {
+      const r = await fetch(`replies/${a.id}.enc?t=${Date.now()}`, { cache: 'no-store' })
+      if (r.ok) buf = new Uint8Array(await r.arrayBuffer()); else if (r.status !== 404) throw new Error(`HTTP ${r.status}`)
+    }
+    const th = buf ? await decrypt(buf, key) : { msgs: [], replies: [] }
+    threads.set(a.id, th)
+    // Once the Mac has it, the thread is the record; drop the local copy.
+    saveSent(sentList().filter(m => !(m.aid === a.id && th.msgs.some(x => x.id === m.id))))
+  } catch { /* keep the last thread we had */ }
+  renderChat()
+}
+function renderChat() {
+  const a = data && current(); if (!a) return
+  $('#chat').hidden = false
+  const ta = $('#msg')
+  if (chatFor !== a.id) { chatFor = a.id; ta.value = drafts.get(a.id) || ''; grow(); if (!sending) note('') }
+  ta.placeholder = tok() ? `Message ${cap(a.name)}` : 'Add a send key (settings)'
+  if (!tok() && !$('#chatmsg').textContent) note('Add a send key (settings)')
+  if (tok() && $('#chatmsg').textContent === 'Add a send key (settings)') note('')
+  const th = threads.get(a.id) || { msgs: [], replies: [] }
+  const byId = new Map()
+  for (const m of sentList()) if (m.aid === a.id) byId.set(m.id, { ...m, st: 'sent' })
+  for (const m of th.msgs) byId.set(m.id, { ...m, st: 'delivered' })
+  const msgs = [...byId.values()].sort((x, y) => x.sentMs - y.sentMs).slice(-5)
+  $('#thread').innerHTML = msgs.map(m => {
+    const rs = (th.replies || []).filter(r => r.id === m.id)
+    const st = rs.length ? 'replied' : m.st
+    return `<li><span class="t">${when(m.sentMs)}</span>${esc(m.text)} <span class="st ${st}">· ${st}</span>` +
+      rs.map(r => `<div class="rep"><span class="t">${when(r.atMs)}</span><b>${esc(cap(a.name))}:</b> ${esc(r.text)}</div>`).join('') + '</li>'
+  }).join('')
+}
+function grow() { const ta = $('#msg'); ta.style.height = 'auto'; if (ta.value) ta.style.height = ta.scrollHeight + 2 + 'px' }
+$('#msg').addEventListener('input', () => { if (chatFor) drafts.set(chatFor, $('#msg').value); grow() })
+$('#msg').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $('#sendform').requestSubmit() } })
+$('#sendform').addEventListener('submit', async e => {
+  e.preventDefault()
+  if (!tok()) { openSettings(); return }
+  const a = current(), text = $('#msg').value.trim()
+  if (!a || !text || sending) return
+  sending = true; $('#sendbtn').disabled = true; note('Sending…')
+  try {
+    saveSent([...sentList(), await sendMessage(a, text)])
+    drafts.delete(a.id); if (chatFor === a.id) { $('#msg').value = ''; grow() }
+    note('')
+  } catch (err) { note(err.message, true) }
+  finally { sending = false; $('#sendbtn').disabled = false; renderChat() }
+})
+function openSettings() {
+  $('#settings').hidden = false
+  $('#tokmsg').textContent = tok() ? 'A send key is saved in this browser.' : 'No send key yet.'
+  $('#tokin').focus()
+}
+$('#setbtn').onclick = () => { if ($('#settings').hidden) openSettings(); else $('#settings').hidden = true }
+$('#toksave').onclick = async () => {
+  const v = $('#tokin').value.trim(), msg = $('#tokmsg')
+  if (!v) { msg.textContent = 'Paste the token first.'; return }
+  msg.textContent = 'Checking…'
+  let say = 'Saved in this browser only.'
+  try {
+    const r = await gh('', {}, v)
+    if (r.status === 401) { msg.textContent = 'GitHub rejected that token. Not saved.'; return }
+    if (!r.ok) say = `Saved, but GitHub said ${r.status} for this repo; check the token's repository access.`
+  } catch { say = 'Saved (could not reach GitHub to check it).' }
+  LS.set('plans-gh-token', v); $('#tokin').value = ''; msg.textContent = say
+  note(''); renderChat(); pullThread()
+}
+$('#tokdel').onclick = () => { LS.del('plans-gh-token'); $('#tokmsg').textContent = 'Removed from this browser.'; note(''); renderChat() }
 
 // ---- start ----
 key = keyFrom(location.hash) || LS.get('plans-key')

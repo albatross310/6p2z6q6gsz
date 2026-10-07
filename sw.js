@@ -1,6 +1,7 @@
-// Shell: served from cache at once, refreshed in the background. plans/*.enc: always the network,
-// falling back to the last copy seen (marked with x-plans-cache: 1 so the page can say it is offline).
-const SHELL = 'plans-shell-v3', DATA = 'plans-data'
+// Shell: served from cache at once, refreshed in the background. plans/*.enc and replies/*.enc: always the
+// network, falling back to the last copy seen (marked with x-plans-cache: 1 so the page can say it is offline);
+// a 404 reply thread is passed through (it means "no messages yet", not "offline").
+const SHELL = 'plans-shell-v4', DATA = 'plans-data'
 const FILES = ['./', 'manifest.webmanifest', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png']
 self.addEventListener('install', e => { e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES))); self.skipWaiting() })
 self.addEventListener('activate', e => {
@@ -9,13 +10,14 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url)
   if (e.request.method !== 'GET' || url.origin !== location.origin) return
-  if (/\/plans\/[^/]+\.enc$/.test(url.pathname)) {
+  if (/\/(plans|replies)\/[^/]+\.enc$/.test(url.pathname)) {
     const slot = url.pathname.split('/').slice(-2).join('/')
     e.respondWith((async () => {
       const c = await caches.open(DATA)
       try {
         const r = await fetch(e.request, { cache: 'no-store' })
         if (r.ok) { await c.put(slot, r.clone()); return r }
+        if (r.status === 404 && slot.startsWith('replies/')) { await c.delete(slot); return r }
         throw new Error(r.status)
       } catch (err) {
         const old = await c.match(slot)

@@ -4,7 +4,8 @@
 //   node push-plan.mjs <name> <file.md>        encrypt and push that plan
 //   node push-plan.mjs --delete <name>          remove that agent's tab
 //
-// Run it inside a clone of this repo (it works on the clone it lives in). The key is the 43-character
+// Run it from a DEDICATED clone of this repo (it works on the clone it lives in, and resets that clone to
+// origin/main on every push, so keep no edits there). The key is the 43-character
 // base64url string after "#k=" in the phone link: put it in $PLANS_KEY, or in a file named by
 // $PLANS_KEY_FILE (default ~/.claude/plans-site/key). Nothing readable ever leaves the machine.
 //
@@ -62,10 +63,11 @@ export async function pushPlans({ repo, key, changes, from = hostname(), prune, 
     const index = await readFile(idxPath).then(b => open(key, b), () => ({ agents: [] }))
     const byId = new Map(index.agents.map(a => [a.id, a]))
     let changed = false
+    const touched = []
     for (const c of changes) {
       const id = agentId(key, c.name)
       if (c.delete) {
-        if (byId.delete(id)) { await rm(join(dir, `${id}.enc`), { force: true }); changed = true }
+        if (byId.delete(id)) { await rm(join(dir, `${id}.enc`), { force: true }); changed = true; touched.push('-' + c.name) }
         continue
       }
       const h = textMac(key, c.text), old = byId.get(id)
@@ -73,14 +75,14 @@ export async function pushPlans({ repo, key, changes, from = hostname(), prune, 
       const updatedMs = c.updatedMs ?? Date.now()
       await writeFile(join(dir, `${id}.enc`), await seal(key, { name: c.name, updatedMs, text: c.text }))
       byId.set(id, { id, name: c.name, updatedMs, pushedMs: Date.now(), from, h })
-      changed = true
+      changed = true; touched.push(c.name)
     }
-    if (prune) for (const [id, e] of byId) if (prune(e)) { byId.delete(id); await rm(join(dir, `${id}.enc`), { force: true }); changed = true }
+    if (prune) for (const [id, e] of byId) if (prune(e)) { byId.delete(id); await rm(join(dir, `${id}.enc`), { force: true }); changed = true; touched.push('-' + e.name) }
     if (!changed) return 'unchanged'
     await writeFile(idxPath, await seal(key, { synced: Date.now(), agents: [...byId.values()] }))
     git('add', '-A', 'plans')
-    const names = changes.map(c => c.name).join(', ') || 'prune'
-    git('commit', '-q', '-m', `plans: ${from}\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`)
+    const names = touched.join(', ')
+    git('commit', '-q', '-m', `plans update\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`)
     try {
       git('push', '-q', 'origin', 'HEAD:main') // fast-forward only; never forced
       log(`pushed ${names} (attempt ${attempt})`)

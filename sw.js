@@ -1,6 +1,6 @@
 // Shell: served from cache at once, refreshed in the background. plans/*.enc: always the network,
 // falling back to the last copy seen (marked with x-plans-cache: 1 so the page can say it is offline).
-const SHELL = 'plans-shell-v2', DATA = 'plans-data'
+const SHELL = 'plans-shell-v3', DATA = 'plans-data'
 const FILES = ['./', 'manifest.webmanifest', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png']
 self.addEventListener('install', e => { e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES))); self.skipWaiting() })
 self.addEventListener('activate', e => {

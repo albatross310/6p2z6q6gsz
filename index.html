@@ -334,7 +334,7 @@ let chatFor = null, sending = false
 const sentList = () => { try { return JSON.parse(LS.get('plans-sent') || '[]') } catch { return [] } }
 const saveSent = a => LS.set('plans-sent', JSON.stringify(a.slice(-60)))
 const b64 = u8 => { let s = ''; for (const c of u8) s += String.fromCharCode(c); return btoa(s) }
-const gh = (path, opt = {}, t = tok()) => fetch(API + path, {
+const gh = (path, opt = {}, t = tok()) => fetch(path ? API + path : API.slice(0, -1), { // the repo itself: no trailing slash (GitHub 404s on it)
   cache: 'no-store', ...opt,
   headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(opt.headers || {}) },
 })

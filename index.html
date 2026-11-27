@@ -214,13 +214,26 @@ async function encrypt(obj, k) {
   const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12)
   return out
 }
+// Raw file from GitHub's API with its ETag remembered: an unchanged file answers 304, which GitHub
+// does not count against the send key's 5000 requests an hour, so polling every few seconds is free
+// while nothing changes. Returns { status, buf } (buf null on 404).
+const etags = new Map()
+async function ghRaw(path) {
+  const was = etags.get(path)
+  const r = await gh(`contents/${path}?ref=main`, { headers: { Accept: 'application/vnd.github.raw', ...(was ? { 'If-None-Match': was.etag } : {}) } })
+  if (r.status === 304 && was) return { status: 200, buf: was.buf }
+  if (!r.ok) return { status: r.status, buf: null }
+  const buf = new Uint8Array(await r.arrayBuffer()), etag = r.headers.get('etag')
+  if (etag) etags.set(path, { etag, buf })
+  return { status: 200, buf }
+}
 async function fetchBlob(path) {
   // With a send key, read straight from GitHub's API: the site's own copy lags each change by a
   // Pages build (a minute or more). Any API failure falls back to the site copy.
   if (tok()) {
     try {
-      const a = await gh(`contents/${path}?ref=main`, { headers: { Accept: 'application/vnd.github.raw' } })
-      if (a.ok) return { buf: new Uint8Array(await a.arrayBuffer()), cached: false }
+      const a = await ghRaw(path)
+      if (a.buf) return { buf: a.buf, cached: false }
     } catch {}
   }
   const r = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-store' })
@@ -417,8 +430,8 @@ async function pullThread() {
   try {
     let buf = null, done = false
     if (tok()) try {
-      const r = await gh(`contents/replies/${a.id}.enc?ref=main`, { headers: { Accept: 'application/vnd.github.raw' } })
-      if (r.ok) { buf = new Uint8Array(await r.arrayBuffer()); done = true } else if (r.status === 404) done = true
+      const r = await ghRaw(`replies/${a.id}.enc`)
+      if (r.buf) { buf = r.buf; done = true } else if (r.status === 404) done = true
     } catch {}
     if (!done) {
       const r = await fetch(`replies/${a.id}.enc?t=${Date.now()}`, { cache: 'no-store' })
@@ -503,7 +516,10 @@ if (key) {
   if (keyFrom(location.hash) !== key) history.replaceState(null, '', `#k=${key}`)
   refresh()
 } else showUnlock()
-setInterval(() => { if (document.visibilityState === 'visible') refresh() }, 10e3) // near-live with a send key (API); without one the site copy only changes per Pages build
+// Every 3 s with a send key (ETag polls cost nothing while nothing changes); 30 s without one, when
+// the site's own copy only changes per Pages build anyway. Not 1 s: the Mac pushes a change ~2 s after
+// it, so faster polling would gain under a second and spend GitHub's rate limit on every change.
+setInterval(() => { if (document.visibilityState === 'visible' && (tok() || Date.now() - checked > 30e3)) refresh() }, 3e3)
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh() })
 addEventListener('focus', refresh)
 addEventListener('pageshow', refresh)

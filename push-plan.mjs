@@ -179,7 +179,7 @@ export const logLine = (atMs, id, text) =>
  * Files that fail to decrypt are left in place and reported; errors (fetch, push) throw.
  * Returns {delivered: n, bad: [path]}.
  */
-export async function processInbox({ repo, key, names, logDir, log = () => {} }) {
+export async function processInbox({ repo, key, names, logDir, log = () => {}, onCross }) {
   const mine = new Map(names.map(n => [agentId(key, n), n]))
   await mkdir(logDir, { recursive: true })
   for (const n of names) await appendFile(join(logDir, `${n}.log`), '') // so `tail -F` has a file from day one
@@ -204,6 +204,13 @@ export async function processInbox({ repo, key, names, logDir, log = () => {} })
       const have = await readFile(file, 'utf8').catch(() => '')
       const now = Date.now()
       for (const { path, msg } of items) {
+        // A cross-off from the site (kind 'cross' / 'uncross'): applied to the plan file by the caller,
+        // never logged as a message. No handler (an older sync) = left in the repo for one that has it.
+        if (msg.kind === 'cross' || msg.kind === 'uncross') {
+          if (!onCross) continue
+          try { await onCross(name, msg) } catch (e) { log('ERROR cross-off (will retry):', e.message); continue }
+          del.push(path); continue
+        }
         if (!have.includes(` ${msg.id} `)) await appendFile(file, logLine(now, msg.id, msg.text))
         if (!t.msgs.some(x => x.id === msg.id)) t.msgs.push({ id: msg.id, text: msg.text, sentMs: msg.sentMs, deliveredMs: now })
         del.push(path); delivered++

@@ -102,6 +102,13 @@ details.card summary h2 { display: inline; }
 details.card summary::after { content: " ▸"; color: var(--dim); }
 details.card[open] summary::after { content: " ▾"; }
 .done { color: var(--dim); margin-top: 6px; }
+/* Cross-off on "Live — you haven't checked yet" (Peter, 27 Nov): struck through at once, gone after 60 min. */
+.xbtn { float: right; margin: -2px 0 4px 10px; min-width: 34px; height: 30px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--live) 45%, transparent); background: transparent; color: var(--live); font: inherit; font-weight: 700; cursor: pointer; }
+.xbtn:active { transform: scale(.96); }
+.item.crossed .title, .item.crossed .detail { text-decoration: line-through; color: var(--dim); }
+.rpbtn { margin-left: 6px; height: 22px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--dim); font: inherit; font-size: 12px; cursor: pointer; }
+.msgbtn { float: right; height: 26px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line, #d6d6d0); background: transparent; color: var(--dim); font: inherit; font-size: 13px; cursor: pointer; }
+.item.crossed .xbtn { border-color: var(--dim); color: var(--dim); }
 .empty { color: var(--dim); padding: 24px 2px; }
 #unlock { padding: 24px 16px; max-width: 520px; }
 #unlock input { width: 100%; font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
@@ -157,8 +164,11 @@ function parsePlan(name, text, updatedMs) {
     const it = /^(?:[-*]|(\d+|[a-z])\.)\s+(.*)$/.exec(line)
     const body = it ? it[2].replace(/^\[[ xX]\]\s*/, '').trim() : undefined
     const n = (it && it[1]) || (/^(\d+|[a-z])\.\s+/.exec(body || '') || [])[1]
-    const t = n && !(it && it[1]) ? body.replace(/^(?:\d+|[a-z])\.\s+/, '') : body
-    if (t && cur && !/^\(nothing/i.test(t)) cur.items.push({ text: t, detail: [], ...(n ? { num: n } : {}) })
+    let t = n && !(it && it[1]) ? body.replace(/^(?:\d+|[a-z])\.\s+/, '') : body
+    // " {crossed:<ISO>}" — written by the Mac when Peter crosses an item off on this site.
+    const x = t && /\s*\{crossed:([^}]+)\}\s*$/.exec(t)
+    if (x) t = t.slice(0, x.index)
+    if (t && cur && !/^\(nothing/i.test(t)) cur.items.push({ text: t, detail: [], ...(n ? { num: n } : {}), ...(x ? { crossedMs: Date.parse(x[1]) || 0 } : {}) })
   }
   return { name, updatedMs, sections: sections.filter(s => s.items.length) }
 }
@@ -205,6 +215,14 @@ async function encrypt(obj, k) {
   return out
 }
 async function fetchBlob(path) {
+  // With a send key, read straight from GitHub's API: the site's own copy lags each change by a
+  // Pages build (a minute or more). Any API failure falls back to the site copy.
+  if (tok()) {
+    try {
+      const a = await gh(`contents/${path}?ref=main`, { headers: { Accept: 'application/vnd.github.raw' } })
+      if (a.ok) return { buf: new Uint8Array(await a.arrayBuffer()), cached: false }
+    } catch {}
+  }
   const r = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-store' })
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return { buf: new Uint8Array(await r.arrayBuffer()), cached: r.headers.get('x-plans-cache') === '1' }
@@ -265,20 +283,32 @@ function agentsSorted() {
     .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
 }
 
+const CROSS_HIDE_MS = 60 * 60e3
+// Crosses sent from this browser that the plan has not caught up with yet: text -> { on, at }.
+const pendingX = new Map()
+function crossedAt(t) {
+  const p = pendingX.get(t.text)
+  if (p && Date.now() - p.at < 10 * 60e3 && (p.on ? !t.crossedMs : !!t.crossedMs)) return p.on ? p.at : 0
+  pendingX.delete(t.text)
+  return t.crossedMs || 0
+}
 function itemHtml(t, title, now) {
   const c = secColor(title)
+  const live = /^live/i.test(title), xAt = live ? crossedAt(t) : 0
+  if (xAt && now - xAt > CROSS_HIDE_MS) return ''
+  const xb = live ? `<button class="xbtn" data-x="${esc(t.text)}" aria-label="${xAt ? 'Uncross' : 'Cross off'}" title="${xAt ? 'Uncross' : 'Cross off'}">${xAt ? '↺' : '✓'}</button>` : ''
   const mark = t.num ? `<span class="badge">${esc(t.num)}</span>` : `<span class="bullet">•</span>`
   const left = t.eta ? etaLeft(t.eta, now) : ''
   const eta = left ? ` <span class="eta${left === 'overdue' ? ' over' : ''}">· ETA ${esc(t.eta)} (${left})</span>` : ''
   const det = t.detail.map(d => `<div class="detail">${fmt(d).replace(/^([A-Z][A-Za-z ]{0,18}:)/, '<b>$1</b>')}</div>`).join('')
-  return `<div class="item"><div class="title">${mark}${fmt(t.text)}${eta}</div>${det}</div>`
+  return `<div class="item${xAt ? ' crossed' : ''}">${xb}<div class="title">${mark}${fmt(t.text)}${eta}</div>${det}</div>`
 }
 function planHtml(a, now) {
   const open = a.sections.filter(s => !isDone(s.title)), done = a.sections.filter(s => isDone(s.title))
   let h = `<div class="agent-head"><h1>${esc(a.name)}</h1><span>updated ${ago(a.updatedMs, now)} ago</span></div>`
   for (const s of open) {
     const c = secColor(s.title)
-    h += `<section class="card" style="${c ? `--c:${c}` : ''}"><h2>${esc(s.title)}</h2>${s.items.map(t => itemHtml(t, s.title, now)).join('')}</section>`
+    h += `<section class="card" style="${c ? `--c:${c}` : ''}"><button class="msgbtn" data-s="${esc(s.title)}" title="Message ${esc(a.name)} about this section">Message</button><h2>${esc(s.title)}</h2>${s.items.map(t => itemHtml(t, s.title, now)).join('')}</section>`
   }
   for (const s of done) {
     h += `<details class="card"><summary><h2>${esc(s.title)} · ${s.items.length}</h2></summary>${s.items.map(t => `<div class="done">✓ ${fmt(t.text)}</div>`).join('')}</details>`
@@ -344,6 +374,31 @@ function current() {
 }
 function note(text, warn) { $('#chatmsg').textContent = text || ''; $('.chatnote').classList.toggle('warn', !!warn) }
 
+async function sendCross(a, text, on) {
+  const sentMs = Date.now()
+  const id = `${sentMs}-${[...crypto.getRandomValues(new Uint8Array(3))].map(b => b.toString(16).padStart(2, '0')).join('')}`
+  const body = await encrypt({ v: 1, id, name: a.name, kind: on ? 'cross' : 'uncross', text, sentMs }, key)
+  const r = await gh(`contents/inbox/${a.id}/${id}.enc`, { method: 'PUT', body: JSON.stringify({ message: 'cross', content: b64(body) }) })
+  if (!r.ok) throw new Error(r.status === 401 ? 'GitHub rejected the send key (settings).' : r.status === 403 || r.status === 404 ? 'the send key cannot write to this repo (settings).' : `GitHub said ${r.status}.`)
+}
+$('#plan').addEventListener('click', async e => {
+  // "Message" on a section: the box at the top, already saying which section (Peter, 27 Nov).
+  const mb = e.target.closest('.msgbtn')
+  if (mb) {
+    const ta = $('#msg'); if (!ta) return
+    const pre = `About "${mb.dataset.s}": `
+    if (!ta.value.startsWith(pre)) ta.value = pre + ta.value.replace(/^(?:Re|About) "[^"]*": /, '')
+    ta.dispatchEvent(new Event('input')); scrollTo({ top: 0, behavior: 'smooth' }); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length)
+    return
+  }
+  const b = e.target.closest('.xbtn'); if (!b) return
+  const a = current(); if (!a) return
+  if (!tok()) { note('Crossing off needs the send key (settings).', true); return }
+  const text = b.dataset.x, on = !b.closest('.item').classList.contains('crossed')
+  pendingX.set(text, { on, at: Date.now() }); render()
+  try { await sendCross(a, text, on) }
+  catch (err) { pendingX.delete(text); render(); note('Not crossed off: ' + (err.message || 'no connection?'), true) }
+})
 async function sendMessage(a, text) {
   const sentMs = Date.now()
   const id = `${sentMs}-${[...crypto.getRandomValues(new Uint8Array(3))].map(b => b.toString(16).padStart(2, '0')).join('')}`
@@ -393,10 +448,17 @@ function renderChat() {
     const rs = (th.replies || []).filter(r => r.id === m.id)
     const st = rs.length ? 'replied' : m.st
     return `<li><span class="t">${when(m.sentMs)}</span>${esc(m.text)} <span class="st ${st}">· ${st}</span>` +
-      rs.map(r => `<div class="rep"><span class="t">${when(r.atMs)}</span><b>${esc(cap(a.name))}:</b> ${esc(r.text)}</div>`).join('') + '</li>'
+      rs.map(r => `<div class="rep"><span class="t">${when(r.atMs)}</span><b>${esc(cap(a.name))}:</b> ${esc(r.text)} <button class="rpbtn" data-r="${esc(r.text.slice(0, 60))}">Reply</button></div>`).join('') + '</li>'
   }).join('')
 }
 function grow() { const ta = $('#msg'); ta.style.height = 'auto'; if (ta.value) ta.style.height = ta.scrollHeight + 2 + 'px' }
+// "Reply" under an agent's reply: the box, already quoting what it is answering (Peter, 27 Nov).
+$('#thread').addEventListener('click', e => {
+  const b = e.target.closest('.rpbtn'); if (!b) return
+  const ta = $('#msg'), q = b.dataset.r, pre = `Re "${q}${q.length >= 60 ? '…' : ''}": `
+  ta.value = pre + ta.value.replace(/^(?:Re|About) "[^"]*": /, '')
+  ta.dispatchEvent(new Event('input')); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length)
+})
 $('#msg').addEventListener('input', () => { if (chatFor) drafts.set(chatFor, $('#msg').value); grow() })
 $('#msg').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $('#sendform').requestSubmit() } })
 $('#sendform').addEventListener('submit', async e => {
@@ -441,7 +503,7 @@ if (key) {
   if (keyFrom(location.hash) !== key) history.replaceState(null, '', `#k=${key}`)
   refresh()
 } else showUnlock()
-setInterval(() => { if (document.visibilityState === 'visible') refresh() }, 30e3)
+setInterval(() => { if (document.visibilityState === 'visible') refresh() }, 10e3) // near-live with a send key (API); without one the site copy only changes per Pages build
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh() })
 addEventListener('focus', refresh)
 addEventListener('pageshow', refresh)
